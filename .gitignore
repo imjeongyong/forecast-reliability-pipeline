@@ -1,0 +1,13 @@
+# 비밀값
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
