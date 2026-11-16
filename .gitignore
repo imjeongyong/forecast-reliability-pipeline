@@ -14,3 +14,6 @@ Thumbs.db
 
 # 로컬 수집 결과
 data/
+
+# 배포 패키지
+dist/
