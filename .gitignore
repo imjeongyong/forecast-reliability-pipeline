@@ -17,3 +17,6 @@ data/
 
 # 배포 패키지
 dist/
+
+# Airflow 실행 로그
+logs/
