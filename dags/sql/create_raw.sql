@@ -28,5 +28,6 @@ CREATE TABLE IF NOT EXISTS raw.load_log (
         CHECK (status IN ('loaded', 'count_mismatch', 'source_missing', 'error')),
     error          text,
     loaded_at      timestamptz  NOT NULL DEFAULT now(),
+    fetched_at     timestamptz,
     PRIMARY KEY (base_date, base_time, nx, ny)
 );
