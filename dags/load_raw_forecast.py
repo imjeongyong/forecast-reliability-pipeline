@@ -156,8 +156,15 @@ def load_raw_forecast():
         print(f"처리 {len(results)}건: {summary}")
         return summary
 
+    @task(retries=0)
+    def report(summary):
+        print(f"적재 결과: {summary}")
+        bad = {k: v for k, v in summary.items() if k != "loaded"}
+        if bad:
+            raise RuntimeError(f"적재되지 않은 파일 {sum(bad.values())}건: {bad}")
+
     pending = find_pending()
     ensure_tables() >> pending
-    load_files(pending)
+    report(load_files(pending))
 
 load_raw_forecast()
