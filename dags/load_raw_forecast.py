@@ -30,8 +30,9 @@ def load_raw_forecast():
         from airflow.providers.postgres.hooks.postgres import PostgresHook
 
         hook = PostgresHook(postgres_conn_id="dw_postgres")
-        hook.run((SQL_DIR / "create_raw.sql").read_text(encoding="utf-8"))
-        print("raw 테이블 확인 완료")
+        for name in ["create_raw.sql", "create_dq.sql"]:
+                hook.run((SQL_DIR / name).read_text(encoding="utf-8"))
+        print("raw, dq 테이블 확인 완료")
 
     @task
     def find_pending(params=None):
