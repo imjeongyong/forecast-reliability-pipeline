@@ -14,6 +14,7 @@ DQ_RULES = [
     ("fetched_before_issue", "error"),
     ("fetch_delay", "warn"),
     ("duplicate_rows", "error"),
+    ("raw_vs_load_log", "error"),
 ]
 
 
