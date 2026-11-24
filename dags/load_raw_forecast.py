@@ -8,6 +8,14 @@ from airflow.sdk import Param, dag, task
 
 SQL_DIR = Path(__file__).parent / "sql"
 
+DQ_RULES = [
+    ("missing_manifest", "error"),
+    ("rows_by_base_time", "error"),
+    ("fetched_before_issue", "error"),
+    ("fetch_delay", "warn"),
+    ("duplicate_rows", "error"),
+]
+
 
 @dag(
     dag_id="load_raw_forecast",
@@ -31,7 +39,7 @@ def load_raw_forecast():
 
         hook = PostgresHook(postgres_conn_id="dw_postgres")
         for name in ["create_raw.sql", "create_dq.sql"]:
-                hook.run((SQL_DIR / name).read_text(encoding="utf-8"))
+            hook.run((SQL_DIR / name).read_text(encoding="utf-8"))
         print("raw, dq 테이블 확인 완료")
 
     @task
@@ -157,15 +165,64 @@ def load_raw_forecast():
         print(f"처리 {len(results)}건: {summary}")
         return summary
 
+    @task
+    def dq_checks(run_id=None):
+        from airflow.providers.postgres.hooks.postgres import PostgresHook
+
+        WRAP = """
+            WITH r AS (
+                {rule}
+            )
+            SELECT (SELECT count(*) FROM r),
+                   (SELECT json_agg(x) FROM (SELECT * FROM r LIMIT 5) x)
+        """
+        SAVE = """
+            INSERT INTO dq.check_result
+                (run_id, check_name, severity, status, failed_count, sample, checked_at)
+            VALUES (%s, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (run_id, check_name) DO UPDATE SET
+                severity = EXCLUDED.severity,
+                status = EXCLUDED.status,
+                failed_count = EXCLUDED.failed_count,
+                sample = EXCLUDED.sample,
+                checked_at = now()
+        """
+
+        conn = PostgresHook(postgres_conn_id="dw_postgres").get_conn()
+        results = []
+        for name, severity in DQ_RULES:
+            rule_sql = (SQL_DIR / "dq" / f"{name}.sql").read_text(encoding="utf-8")
+            with conn.cursor() as cur:
+                cur.execute(WRAP.format(rule=rule_sql))
+                failed, sample = cur.fetchone()
+                status = "fail" if failed > 0 else "pass"
+                cur.execute(SAVE, (run_id, name, severity, status, failed,
+                                json.dumps(sample) if sample is not None else None))
+            conn.commit()
+            results.append({"check": name, "severity": severity, "status": status, "failed": failed})
+            print(f"[{severity}] {name}: {status} ({failed}건)")
+
+        conn.close()
+        return results
+
     @task(retries=0)
-    def report(summary):
+    def report(summary, checks):
         print(f"적재 결과: {summary}")
-        bad = {k: v for k, v in summary.items() if k != "loaded"}
-        if bad:
-            raise RuntimeError(f"적재되지 않은 파일 {sum(bad.values())}건: {bad}")
+        bad_load = {k: v for k, v in summary.items() if k != "loaded"}
+        bad_checks = [c["check"] for c in checks if c["severity"] == "error" and c["status"] == "fail"]
+        warns = [c["check"] for c in checks if c["severity"] == "warn" and c["status"] == "fail"]
+
+        if warns:
+            print(f"경고 (기록만): {warns}")
+        if bad_load or bad_checks:
+            raise RuntimeError(f"적재 실패 {bad_load} / DQ 실패 {bad_checks}")
+        print("적재, DQ 모두 정상")
 
     pending = find_pending()
     ensure_tables() >> pending
-    report(load_files(pending))
+    summary = load_files(pending)
+    checks = dq_checks()
+    summary >> checks
+    report(summary, checks)
 
 load_raw_forecast()
